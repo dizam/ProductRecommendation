@@ -1,0 +1,21 @@
+import pandas as pd
+import numpy as np
+
+chunksize = 500000
+
+result = pd.read_csv("data/test_ver2.csv", skipinitialspace=True, chunksize=chunksize, parse_dates=[0, 5, 9], dtype={'conyuemp': object, 'ult_fec_cli_1t': np})
+
+
+
+for i, chunk in enumerate(result):
+    chunk['age'] = chunk['age'].apply(pd.to_numeric, errors='coerce')
+    non_numeric_cols = chunk.select_dtypes(['object']).columns
+    for col in non_numeric_cols:
+        chunk[col] = chunk[col].astype('category')
+    chunk[non_numeric_cols] = chunk[non_numeric_cols].apply(lambda x: x.cat.codes)
+
+    chunk.to_pickle("data/testing_panda_"+str(i)+".pkl")
+
+
+
+    print("Finished parsing "+str((i+1)*chunksize)+" rows")

@@ -1,0 +1,21 @@
+#!/bin/user/python3
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+print('Loading data...')
+data = np.loadtxt('../samples/sample1.csv', delimiter = ',')
+
+X = np.matrix(data[0:1000,  0:24])
+Y = np.matrix(data[0:1000, 24:48])
+
+Color = ['green' if c else 'red' for c in Y[:,2]]
+
+samples = 10
+
+for i in range(samples):
+    for j in range(i + 1, samples):
+        plt.subplot(samples, samples, i * samples + j + 1)
+        plt.scatter(X[:,i], X[:,j], color=Color)
+
+plt.show()

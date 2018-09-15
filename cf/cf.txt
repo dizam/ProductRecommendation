@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+
+import sys
+from pandas import read_csv
+from pandas import merge
+import numpy as np
+from datetime import datetime
+import argparse
+import csv
+
+sys.path.append('..')
+
+import common
+import similarity
+
+"""
+Generate user data for specified month
+"""
+def parse_train(file_name=common.TRAIN_FILE, num_rows=None, sample_frac=None,
+                select_date=None, write=None):
+    train_file = open(file_name, 'rb+')
+
+    columns = common.ID_COLS.copy()
+    columns.extend(common.PRODUCTS)
+
+    types = {columns[x]: np.float32 for x in range(1, len(columns) - 2)}
+
+    data = read_csv(
+        train_file,
+        quotechar='"',
+        header=0,
+        usecols=columns,
+        na_values='NA',
+        na_filter=True,
+        skip_blank_lines=True,
+        parse_dates=[common.ID_COLS[0]],
+        infer_datetime_format=True,
+        encoding='utf-8',
+        nrows=num_rows,
+        memory_map=True
+    )
+
+    train_file.close()
+
+    data = data.astype(types, copy=True)
+    data = data.dropna(how='any')
+
+    if sample_frac is not None:
+        data = data.sample(frac=sample_frac)
+
+    if select_date is not None:
+        data = data.loc[data['fecha_dato'] == select_date]
+
+    if write is not None:
+        data.to_csv(write, index=False)
+
+    return np.asmatrix(data.as_matrix())
+
+"""
+Get user data from file
+"""
+def parse_users(file_name):
+    f = open(file_name)
+    reader = csv.DictReader(f)
+
+    user_dict = {}
+
+    for row in reader:
+        id = float(row[common.ID_COLS[1]])
+        user_dict[id] = []
+
+        for i in range(len(common.PRODUCTS)):
+            user_dict[id].append(float(row[common.PRODUCTS[i]]))
+
+    f.close()
+    return user_dict
+
+"""
+Get user IDs
+"""
+def parse_test(file_name=common.TEST_FILE):
+    f = open(file_name)
+    reader = csv.DictReader(f)
+
+    user_ids = []
+
+    for row in reader:
+        user_ids.append(float(row[common.ID_COLS[1]]))
+    f.close()
+    return user_ids
+
+
+def weight_items(A):
+    W = np.asmatrix(np.zeros(shape=(A.shape[1], A.shape[1])))
+
+    for i in range(W.shape[0]):
+        for j in range(W.shape[1]):
+            #W[i, j] = similarity.cosine(A[:, i], A[:, j])
+            W[i, j] = similarity.cond_sim(A[:, i], A[:, j])
+            print(i, j)
+
+    return W
+
+
+def find_closest(W):
+    K = np.asmatrix(np.zeros(shape=W.shape))
+
+    for i in range(W.shape[1]):
+        K[:, i] = (-W[:, i]).argsort(axis=0)
+    return K
+
+
+def calc_baseline(products, user_ids):
+    """
+    Calculate baseline prediction, which is the average of all ratings (items owned by m users)
+    products: mx24 matrix containing products owned by each user
+    return: baseline prediction
+    """
+    # print(ids)
+    # print(len(products))
+    print(len(products[user_ids[0]]))
+    b = 0
+    for u in user_ids:
+        if u not in products:
+            continue
+        p = products[u]
+        for j in range(len(products[u])):
+            b += p[j]
+    b /= len(products) * len(products[user_ids[0]])
+    print(b)
+    return b
+
+
+def predict(products, W, K, k, b):
+    """
+   Make prediction probabilities for user with id *id* and products.
+   :param products: The products that id has, a numpy.matrix of size 24x1
+   :param W: The Weight matrix, see weight_items
+   :param K: A 24x24 matrix of closest products to the ith column, see numpy.argsort
+   :param k: The number of items to consider in the similarity ranking
+   :return: A numpy.matrix of size 24x1 where the j-th row is the likelihood of
+            the j-th product, or -1 if the *id* already has this product
+   """
+    p = np.asmatrix(np.zeros(shape=(W.shape[0], 1)))
+
+    for i in range(p.shape[0]):
+        if products[i] == 1:
+            p[i] = -1
+        else:
+            p[i] = np.dot(W[i, :], products)
+            # s = np.array([int(q) for q in K[:, i].T.tolist()[0][:k]])
+            # w = W[i, s]
+            # pr = np.array(products)[s]
+            #
+            # p[i] = np.dot(w, pr)[0,0] / np.abs(w).sum()
+            #
+            # numer = 0
+            # denom = 0
+            # for j in [int(q) for q in K[:, i].T.tolist()[0][:k]]:
+            #     numer += W[i, j] * (products[j] - b)
+            #     denom += abs(W[i, j])
+            # p[i] = (numer / denom) + b
+    return p
+
+
+def predict_all(user_ids, user_dict, W, K, k, b):
+    """
+    Go through all users and  give them a recommendation.
+    :param user_ids: The ids of all users
+    :param user_dict: The products of all users
+    :param W: The similarities matrix
+    :param K: The closest items matrix
+    :param k: The number of items to consider
+    :return: P a list of
+    """
+    P = []
+
+    count = 0
+    for u in user_ids:
+        if u not in user_dict:
+            continue
+        P.append([u] + predict(user_dict[u], W, K, k, b).T.argsort().tolist()[0][-7:])
+        if count % 50000 == 0:
+            print(count)
+        count += 1
+    return P
+
+"""
+Write predictions to output file
+"""
+def write_predictions(P, file_name):
+    with open(file_name, 'w') as file:
+        writer = csv.writer(file, delimiter=',', quotechar='"',
+                            quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(['ncodpers', 'added_products'])
+        for row in P:
+            writer.writerow(
+                [
+                    int(row[0]),
+                    ' '.join([common.PRODUCTS[x] for x in row[1:]])
+                ]
+            )
+
+
+def MAP_func(predict, actual):
+    """
+    Evaluate prediction with Mean Average Precision @ 7 method.
+    :param predict: The predicted products csv
+    :param actual: The actual products csv
+    return: MAP@7
+    """
+    productdictionary = {'ind_ahor_fin_ult1': 0,
+                         'ind_aval_fin_ult1': 1,
+                         'ind_cco_fin_ult1': 2,
+                         'ind_cder_fin_ult1': 3,
+                         'ind_cno_fin_ult1': 4,
+                         'ind_ctju_fin_ult1': 5,
+                         'ind_ctma_fin_ult1': 6,
+                         'ind_ctop_fin_ult1': 7,
+                         'ind_ctpp_fin_ult1': 8,
+                         'ind_deco_fin_ult1': 9,
+                         'ind_deme_fin_ult1': 10,
+                         'ind_dela_fin_ult1': 11,
+                         'ind_ecue_fin_ult1': 12,
+                         'ind_fond_fin_ult1': 13,
+                         'ind_hip_fin_ult1': 14,
+                         'ind_plan_fin_ult1': 15,
+                         'ind_pres_fin_ult1': 16,
+                         'ind_reca_fin_ult1': 17,
+                         'ind_tjcr_fin_ult1': 18,
+                         'ind_valo_fin_ult1': 19,
+                         'ind_viv_fin_ult1': 20,
+                         'ind_nomina_ult1': 21,
+                         'ind_nom_pens_ult1': 22,
+                         'ind_recibo_ult1': 23}
+    U = actual.shape[0]  # number of users
+    meanavgp = 0  # MAP
+    userkeys = predict.ix[:, 0]
+    productstrings = predict.ix[:, 1]
+    products = [None] * 2000000 #
+    for l in range(0, userkeys.size):  # create dictionary array where the user id is the key and the products predicted is the value
+        value = productstrings.ix[l].split()
+        user = userkeys.ix[l, 0]
+        products[user] = value
+
+    for i in range(0, U):  # mean average summation
+        userkey = actual[i, 0]  # the user we are looking for in our predicted output file
+        predproduct = products[int(userkey)]
+        m = (actual[i] == 1).sum()  # the number of added products is the number of 1s in the added product matrix
+        if m == 0 or predproduct is None:  # if there are 0 added products or there was no prediction for the user, precision is 0
+            meanavgp += 0
+            continue
+
+        n = len(predproduct)  # number of predicted products, should always be 7 for us
+
+        precision = 0
+        correct = 0  # number of predictions correct
+        for j in range(min(n, 7)):  # precision summatiom
+            productadd = productdictionary[predproduct[j]]  # product that we predicted was added (0-24)
+            if (actual[i, productadd + 1]) == 1:  # if the product we predicted was added is 1 in the added products matrix
+                correct += 1  # we are correct
+                precision += float(correct) / (j + 1)  # MAP formula
+
+        meanavgp += (float(1) / min(m, 7) * precision)  # MAP formula
+
+    meanavgp /= abs(U)  # MAP formula
+    return meanavgp
+
+
+def addedProducts(sharedusers):
+    """
+    Get the products the user added.
+    :param sharedusers: Users in both months with both their products
+    return: Matrix of user ids and -1 if product dropped, 0 if not changed, and 1 if product added (first row is all 0 for headers)
+    """
+    P = np.asmatrix(np.zeros(shape=(sharedusers.shape[0], 25)));
+    P[1:, 0] = sharedusers[1:, 0];  # keep users
+    for i in range(1, sharedusers.shape[0]):
+        products1 = sharedusers[i,
+                    1:25];  # products of users from previous month
+        products2 = sharedusers[i,
+                    25:49];  # products of users from current month
+        P[i, 1:] = products2 - products1;  # vector subtraction
+
+    return P;
+
+
+if __name__ == '__main__':
+
+    # Set up the argument parser
+    parser = argparse.ArgumentParser(
+        description='Step wise collaborative filtering')
+
+    parser.add_argument('-s', '--select-users', action='store_true')
+    parser.add_argument('-w', '--calculate-similarity', action='store_true')
+    parser.add_argument('-p', '--predict', action='store_true')
+    parser.add_argument('-e', '--evaluate', action='store_true')
+    parser.add_argument('-l', '--actualadd', action='store_true')
+
+    parser.add_argument('-i', '--input-file')
+    parser.add_argument('-a', '--weight-input-file')
+    parser.add_argument('-t', '--test-file', default=common.TEST_FILE)
+    parser.add_argument('-o', '--output-file')
+    parser.add_argument('-q', '--aux-input-file')
+
+    parser.add_argument('-n', '--num-rows', type=int)
+    parser.add_argument('-f', '--sample-frac', type=float)
+    parser.add_argument('-d', '--select-date', type=str)
+    parser.add_argument('-k', '--num-neighbors', type=int, default=10)
+
+    nsp = parser.parse_args(sys.argv[1:])
+
+    if nsp.select_users:
+        if nsp.select_date:
+            nsp.select_date = datetime.strptime(nsp.select_date, '%Y-%m-%d')
+
+        parse_train(select_date=nsp.select_date, write=nsp.output_file)
+    elif nsp.calculate_similarity:
+        A = np.asmatrix(read_csv(nsp.input_file).as_matrix())
+        W = weight_items(A[:, 2:])
+        np.savetxt(nsp.output_file, W, delimiter=',')
+    elif nsp.predict:
+        # This should be the users file
+        user_dict = parse_users(nsp.input_file)
+
+        # This should be the weight file
+        W = np.asmatrix(read_csv(nsp.weight_input_file).as_matrix())
+
+        # This contains be the ids as a python list
+        user_ids = parse_test(nsp.test_file)
+        b = calc_baseline(user_dict, user_ids)
+        K = find_closest(W)
+
+        P = predict_all(user_ids, user_dict, W, K, nsp.num_neighbors, b)
+
+        write_predictions(P, nsp.output_file)
+    elif nsp.actualadd:
+        prevmonth = read_csv(
+            nsp.input_file)  # previous month user data, generate this CSV
+        prevmonth.drop('fecha_dato', axis=1, inplace=True)  # drop dates
+        curmonth = read_csv(
+            nsp.aux_input_file)  # current month user data, generate this CSV
+        curmonth.drop('fecha_dato', axis=1, inplace=True)  # drop dates
+        sharedusers = merge(prevmonth, curmonth, how='inner', on=[
+            'ncodpers'])  # matrix where users are in both prev and cur month
+        sharedusers.dropna(how='any')
+        A = np.asmatrix(sharedusers)
+        actual = addedProducts(A)
+        np.savetxt(nsp.output_file, actual, delimiter=',')
+    elif nsp.evaluate:
+        predict = read_csv(
+            nsp.input_file)  # predicted output, must generate this CSV
+        temp2 = read_csv(nsp.aux_input_file)
+        actual = np.asmatrix(temp2)  # added products, generate this CSV
+        actual = actual[1:]  # remove empty headers
+        MAP = MAP_func(predict, actual)
+        print(MAP)

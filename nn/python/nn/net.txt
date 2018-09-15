@@ -1,0 +1,151 @@
+#!/user/bin/python3
+
+import gc
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+class NeuralNetwork(object):
+
+    def __init__(self, nodes):
+        self.nodes = nodes
+        self.layer = len(nodes)
+
+        self.w = []
+        for i in range(1, self.layer):
+            self.w.append(np.matrix(np.random.rand(nodes[i], nodes[i - 1] + 1)))
+
+    def Save(self, filename):
+        np.save(filename, self.w)
+
+    def Load(self, filename):
+        self.w = np.load(filename)
+
+    def Train(self, X, Y, alpha, lamda, epoch, mode = 'stochastic', batch = 100, XVal = None, YVal = None):
+        m = X.shape[0]
+        error = []
+        c = 0
+        row = np.random.permutation(m)
+
+        Validation = (XVal is not None) and (YVal is not None)
+
+        if Validation:
+            m_val = XVal.shape[0]
+            error_val = []
+            c_val = 0
+            row_val = np.random.permutation(m_val)
+
+        print('Using', mode, 'gradient descent...')
+        print('Alpha:', alpha, 'Lambda:', lamda, 'Epoch:', epoch)
+        for i in range(epoch):
+            print('\rProgress:', format(i / epoch * 100, '.4f'), end = '')
+
+            if mode == 'stochastic':
+                r = row[i % m]
+                r_val = row_val[i % m_val]
+            elif mode == 'mini-batch':
+                scope = (i % m) * batch
+                scope = np.remainder(range(scope, scope + batch), m)
+                r = np.take(row, scope)
+                scope = (i % m_val) * batch
+                scope = np.remainder(range(scope, scope + batch), m_val)
+                r_val = np.take(row_val, scope)
+            elif mode == 'batch':
+                r = range(m)
+                r_val = range(m_val)
+            else:
+                raise Exception('Invalid training mode:', mode)
+
+            if Validation:
+                cost, grad, cost_val = self.CostFunction(X[r, :], Y[r, :], alpha, lamda, XVal[r_val, :], YVal[r_val, :])
+                c_val += cost_val
+            else:
+                cost, grad = self.CostFunction(X[r, :], Y[r, :], alpha, lamda)
+            c += cost
+
+            if i % (epoch // 100) == (epoch // 100) - 1:
+                error.append(c / (epoch // 100))
+                c = 0
+
+                if Validation:
+                    error_val.append(c_val / (epoch // 100))
+                    c_val = 0
+
+                gc.collect()
+            
+            for l in range(self.layer - 1):
+                self.w[l] += grad[l]
+
+        print('')
+        
+        if Validation:
+            return error, error_val
+        else:
+            return error
+
+    def CostFunction(self, X, Y, alpha, lamda, XVal = None, YVal = None):
+        L = self.layer
+        m = X.shape[0]
+
+        z = [None] * L
+        a = [None] * L
+
+        delta = [None] * L
+        grad  = [None] * (L - 1)
+
+        #Forward propagation
+        a[0] = X
+        for l in range(1, L):
+            a[l - 1] = np.insert(a[l - 1], 0, 1, axis = 1)
+            z[l] = a[l - 1] * self.w[l - 1].T
+            a[l] = self.Sigmoid(z[l])
+
+        #Cost function
+        with np.errstate(divide='ignore'):
+            cost = -1 / m * np.sum(np.multiply(Y, np.log(a[L - 1])) + np.multiply((1 - Y), np.log(1 - a[L - 1])))
+            if XVal is not None and YVal is not None:
+                O = self.Predict(XVal)
+                cost_val = -1 / (XVal.shape[0]) * np.sum(np.multiply(YVal, np.log(O)) + np.multiply((1 - YVal), np.log(1 - O)))
+
+        #Regularization cost
+        reg = 0
+        for l in range(L - 1):
+            reg += np.sum(np.power(self.w[l], 2))
+        cost += lamda / m * reg
+
+        #Back Propagation
+        delta[L - 1] = a[L - 1] - Y
+        grad[L - 2] = -1 / m * (alpha * delta[L - 1].T * a[L - 2])# + lamda * (np.insert(self.w[L - 2][:, 1:], 0, 0, axis = 1)))
+        for l in range(L - 2, 0, -1):
+            delta[l] = (np.multiply((delta[l + 1] * self.w[l]), np.multiply(a[l], 1 - a[l])))[:, 1:]
+            grad[l - 1] = -1 / m * (alpha * delta[l].T * a[l - 1])# + lamda * (np.insert(self.w[l - 1][:, 1:], 0, 0, axis = 1)))
+
+        if XVal is not None and YVal is not None:    
+            return cost, grad, cost_val
+        else:
+            return cost, grad
+
+    def Sigmoid(self, X):
+        return 1 / (1 + np.exp(-X))
+
+    def Predict(self, X, threshold = 0):
+        L = self.layer
+
+        z = [None] * L
+        a = [None] * L
+
+        a[0] = X
+        for l in range(1, L):
+            a[l - 1] = np.insert(a[l - 1], 0, 1, axis = 1)
+            z[l] = a[l - 1] * self.w[l - 1].T
+            a[l] = self.Sigmoid(z[l])
+
+        if threshold != 0:
+            return a[L - 1] >= threshold
+        return a[L-1]
+
+    def Accuracy(self, X, Y, threshold = 0.5):
+        O = self.Predict(X)
+        accuracy  = np.sum(Y == (O >= 0.5)) / (Y.shape[0] * Y.shape[1])
+        return accuracy
+

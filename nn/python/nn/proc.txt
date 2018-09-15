@@ -1,0 +1,21 @@
+#!/bin/user/python3
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def Power(X, p):
+    m, n = X.shape
+
+    S = np.empty([m,0])
+    for i in range(n):
+        for j in range(p):
+            np.append(S, np.power(X[:, i], j), axis=0)
+    return S
+
+def Normalize(X):
+    Mean = np.mean(X, axis = 0)
+    Range  = np.ptp(X, axis = 0)
+    Mean[Range == 1] = 0
+    Range[Range == 0] = 1
+    return (X - Mean) / Range
+

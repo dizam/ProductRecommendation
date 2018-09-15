@@ -1,0 +1,93 @@
+function ECS_Project()
+
+  %% Load training/testing Data
+  load '/tmp2/train1.8M.mat'
+
+  %% Clear Output File
+  outputFile = '/tmp2/finalValues.csv';
+  fileID = fopen(outputFile, 'w');
+  fprintf(fileID, 'ncodpers,added_products\n');
+  fclose(fileID);
+
+  %% Deal with NaN values
+  nTrainSamples=size(DataMatrix,1);
+  for i=1:size(DataMatrix,2)
+       trainColumn = DataMatrix(:,i);
+       colAvg = nanmean(trainColumn);
+       trainColumn(isnan(trainColumn))=colAvg;
+       DataMatrix(:,i)=trainColumn;
+       
+    if (i>=25)        % Assign Avg values to missing columns from test Matrix
+       TestMatrix = [TestMatrix repmat(colAvg,size(TestMatrix,1),1)];
+    else              % Otherwise assign average value to NaN Values
+       testColumn=TestMatrix(:,i);
+       tstColAvg = nanmean(testColumn);
+       testColumn(isnan(testColumn))= tstColAvg;
+       TestMatrix(:,i) = testColumn;
+    end
+  end
+
+
+  %% Combine Data
+  AllData=[DataMatrix; TestMatrix];
+
+  % Only look at relevant columns
+  goodcolumns = [3:6,8:10,12,14,15,17:48];
+  GoodData=AllData(:,goodcolumns);
+
+
+  %% Compute SVD
+  [U,S,V] = svds(GoodData);
+  x = U*S*V';
+
+  predictor    = x(:,end-23:end);                             % Only look at the 24 products
+  predictor    = [AllData(:,2), predictor];                   % Add back userID
+  tstPredictor = predictor(nTrainSamples+1:end,:);            % Remove the training samples
+
+%% Loop through predictor, clean up, write to file
+  for i=1:size(tstPredictor,1)                                % For each test sample
+    testID  = tstPredictor(i,1);
+    indices = find(DataMatrix(:,2)==testID);          
+    if(not(isempty(indices)))                                 % Check if user already in test data
+        alreadyOwned = DataMatrix(max(indices),25:end);       % max(indices) uses the latest appearance
+    else
+        alreadyOwned = zeros(1,24);                           % Otherwise don't subtract anything
+    end
+    
+    updatePredictor = tstPredictor(i,end-23:end) - alreadyOwned;
+    
+    %% Get max 7 values
+    [~,sortedIndices] = sort(updatePredictor,'descend');
+    topIndices = sortedIndices(1:7);
+    cleanPredictor = zeros(1,24);
+    cleanPredictor(topIndices) = 1;
+    
+    %% Write to file
+    writeFile([testID cleanPredictor]);
+    disp(num2str(i));
+  end
+end
+
+function writeFile(finalPredictor)
+
+  ColNames={'ind_ahor_fin_ult1','ind_aval_fin_ult1','ind_cco_fin_ult1','ind_cder_fin_ult1',...
+      'ind_cno_fin_ult1','ind_ctju_fin_ult1','ind_ctma_fin_ult1','ind_ctop_fin_ult1',...
+      'ind_ctpp_fin_ult1','ind_deco_fin_ult1','ind_deme_fin_ult1','ind_dela_fin_ult1',...
+      'ind_ecue_fin_ult1','ind_fond_fin_ult1','ind_hip_fin_ult1','ind_plan_fin_ult1',...
+      'ind_pres_fin_ult1','ind_reca_fin_ult1','ind_tjcr_fin_ult1','ind_valo_fin_ult1',...
+      'ind_viv_fin_ult1','ind_nomina_ult1','ind_nom_pens_ult1','ind_recibo_ult1'};
+  
+  outStr=[num2str(finalPredictor(1)) ',']; % Include UserID in output string
+  for i=2:25
+      if (finalPredictor(i))
+          outStr=[outStr ColNames{i-1} ' ']; % Append predicted added_products
+      end
+  end
+  
+  outputFile = '/tmp2/finalValues.csv';     % Write to file.
+  fileID = fopen(outputFile, 'a');
+  fprintf(fileID, [outStr '\n']);
+  fclose(fileID);
+  
+end
+

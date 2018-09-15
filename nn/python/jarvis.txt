@@ -1,0 +1,82 @@
+#!/user/bin/python3
+
+import gc
+import sys
+import os.path
+import datetime
+
+import pandas
+import numpy as np
+import matplotlib.pyplot as plt
+
+from nn import net, proc
+
+print('Loading data 1 ...', end = '', flush = True)
+data = pandas.read_csv('../samples/sample1.csv')
+
+for i in range(2, 15):
+
+    print('\rLoading data', i, '...', end = '', flush = True)
+    data = np.concatenate((data, pandas.read_csv('../samples/sample' + str(i) + '.csv')))
+
+X = proc.Normalize(np.matrix(data[:, 0:24]))
+Y = np.matrix(data[:, 24:48])
+
+m = int(X.shape[0] * 0.7)
+
+X_train = X[0:m, :]
+Y_train = Y[0:m, :]
+
+X_val = X[m:, :]
+Y_val = Y[m:, :]
+
+print('\rData loaded        \n')
+
+print('Dimension of data    :', data.shape)
+print('Dimension of X       :', X.shape)
+print('Dimension of Y       :', Y.shape)
+print('Dimension of X_train :', X_train.shape)
+print('Dimension of Y_train :', Y_train.shape)
+print('Dimension of X_val   :', X_val.shape)
+print('Dimension of Y_val   :', Y_val.shape)
+
+del X
+del Y
+del data
+gc.collect()
+
+layer = [[24, 24, 24], 
+        [24, 50, 24], 
+        [24, 100, 24],
+        [24, 24, 24, 24], 
+        [24, 50, 50, 24]
+
+learning_rate = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1]
+
+#if os.path.isfile('weights.npy'):
+#    print('\nPrevious weight file found...')
+#    network.Load('weights.npy')
+#    print('Weight loaded')
+
+print('\nBegin training...')
+for l in range(5):
+    for a in range(7):
+        network = net.NeuralNetwork(layer[l])
+        print('Network structure:', layer[l])
+        try:
+            error, error_val = network.Train(X_train, Y_train, learning_rate[a], 0, 1000000, 'mini-batch', 100, X_val, Y_val)
+        except KeyboardInterrupt:
+            #network.Save('weights' + str(a))
+            #print('\nSaved')
+            sys.exit(0)
+
+        print('Accuracy: ', network.Accuracy(X_val, Y_val))
+        plt.plot(error)
+        plt.plot(error_val)
+        plt.savefig('error-' + str(l) + '-' + str(a) + '.png')
+        plt.clf()
+        network.Save('weights' + str(l) + '-' + str(a))
+        print('Weight saved')
+        print()
+        gc.collect()
+

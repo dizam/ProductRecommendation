@@ -1,0 +1,87 @@
+#!/user/bin/python3
+
+import gc
+import sys
+import os.path
+import datetime
+import time
+
+import pandas
+import numpy as np
+import matplotlib.pyplot as plt
+
+from nn import net, proc
+
+print('Loading data 1 ...', end = '', flush = True)
+data = pandas.read_csv('../samples/sample1.csv', header = None)
+
+for i in range(2, 15):
+
+    print('\rLoading data', i, '...', end = '', flush = True)
+    data = np.concatenate((data, pandas.read_csv('../samples/sample' + str(i) + '.csv', header = None)))
+
+May = time.mktime(datetime.datetime.strptime('2016-05-01', '%Y-%m-%d').timetuple())
+
+Before = np.array(data[:, 0] < May)
+After = np.array(data[:, 0] >= May)
+
+X = proc.Normalize(np.matrix(data[:, 0:24]))
+Y = np.matrix(data[:, 24:48])
+
+X_train = X[Before]
+Y_train = Y[Before]
+
+X_val = X[After]
+Y_val = Y[After]
+
+print('\rData loaded        \n')
+
+print('Dimension of data    :', data.shape)
+print('Dimension of X       :', X.shape)
+print('Dimension of Y       :', Y.shape)
+print('Dimension of X_train :', X_train.shape)
+print('Dimension of Y_train :', Y_train.shape)
+print('Dimension of X_val   :', X_val.shape)
+print('Dimension of Y_val   :', Y_val.shape)
+
+del X
+del Y
+del data
+gc.collect()
+
+layer = [[24, 24, 24], 
+        [24, 50, 24], 
+        [24, 100, 24],
+        [24, 24, 24, 24], 
+        [24, 50, 50, 24]]
+
+learning_rate = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1]
+
+l = 2
+a = 2
+
+network = net.NeuralNetwork(layer[l])
+
+if os.path.isfile('weights' + str(l) + '.npy'):
+    print('\nPrevious weight file found...')
+    network.Load('weights' + str(l) + '.npy')
+    print('Weight loaded')
+
+print('\nBegin training...')
+print('Network structure:', layer[l])
+try:
+    error = network.Train(X_train, Y_train, learning_rate[a], 0, 1000000, 'mini-batch', 100)
+except KeyboardInterrupt:
+    network.Save('weights' + str(l))
+    print('\nSaved')
+    sys.exit(0)
+
+plt.plot(error)
+#plt.plot(error_val)
+plt.savefig('error-' + str(l) + '.png')
+plt.clf()
+network.Save('weights' + str(l))
+print('Weight saved')
+print()
+gc.collect()
+

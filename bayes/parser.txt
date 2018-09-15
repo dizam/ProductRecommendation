@@ -1,0 +1,151 @@
+#!/bin/user/python3
+
+import time
+import datetime
+import numpy as np
+import csv
+
+country_code = {}
+
+channel_code = {}
+
+province_code = {}
+
+file_size = 1000000
+
+rows = []
+with open('/home/solgaard/Desktop/171project/train_ver2.csv') as f:
+    f.readline()
+    for line in f:
+        row = [0] * 48
+        sample = line.replace(' ','').replace('\n','').split(',')
+
+        if('NA' in sample):
+            continue
+
+        #Parse date (data 1)
+        date = sample[0].split('-')
+        row[0] = time.mktime(datetime.datetime.strptime(sample[0], "%Y-%m-%d").timetuple())
+
+        if(sample[1] != ''):
+            row[1] = int(sample[1])
+
+        #Parse employee index (data 3)
+        if(sample[2] == 'A'):
+            row[2] = 0
+        elif(sample[2] == 'B'):
+            row[2] = 1
+        elif(sample[2] == 'F'):
+            row[2] = 2
+        elif(sample[2] == 'N'):
+            row[2] = 3
+        elif(sample[2] == 'P'):
+            row[2] = 4
+
+        #Parse country residence
+        if(sample[3] in country_code):
+            row[3] = country_code[sample[3]]
+        else:
+            country_code[sample[3]] = len(country_code) + 1
+            row[3] = country_code[sample[3]]
+
+        #Parse gender
+        if(sample[4] == 'V'):
+            row[4] = 1
+
+        if(sample[5] != ''):
+            row[5] = int(sample[5])
+
+        if(sample[6] != ''):
+            row[6] = time.mktime(datetime.datetime.strptime(sample[6], "%Y-%m-%d").timetuple())
+
+        if(sample[7] != ''):
+            row[7] = int(sample[7])
+
+        if(sample[8] != ''):
+            row[8] = int(sample[8])
+
+        row[9] = int(sample[9] == '1')
+
+        if(sample[10] != ''):
+            row[10] = time.mktime(datetime.datetime.strptime(sample[10], "%Y-%m-%d").timetuple())
+
+        if(sample[11] != 'P' and sample[11] != ''):
+            row[11] = float(sample[11])
+
+        if(sample[12] == 'A'):
+            row[12] = 1
+        elif(sample[12] == 'I'):
+            row[12] = 2
+        elif(sample[12] == 'P'):
+            row[12] = 3
+        elif(sample[12] == 'R'):
+            row[12] = 4
+
+        if(sample[13] == 'S'):
+            row[13] = 1
+
+        if(sample[14] == 'S'):
+            row[14] = 1
+
+        if(sample[15] == '1'):
+            row[15] = 1
+
+        if(sample[16] in channel_code):
+             row[16] = channel_code[sample[16]]
+        else:
+             channel_code[sample[16]] = len(channel_code) + 1
+        row[16] = channel_code[sample[16]]
+
+        if(sample[17] == 'S'):
+            row[17] = 1
+
+        if(sample[18] == '1'):
+            row[18] = 1
+
+        if(sample[19] != ''):
+            row[19] = int(sample[19])
+
+
+        if '"' in sample[21]:
+            sample[20] = sample[20] + ',' + sample[21]
+            sample[21:] = sample[22:]
+
+        if(sample[20] in province_code):
+            row[20] = province_code[sample[20]]
+        else:
+            province_code[sample[20]] = len(province_code) + 1
+            row[20] = province_code[sample[20]]
+
+        if(sample[21] != ''):
+            row[21] = int(sample[21])
+
+        if(sample[22] != ''):
+            row[22] = float(sample[22])
+
+        if sample[23] != '':
+            row[23] = int(sample[23][0:2])
+
+        for i in range(24,48):
+            if(sample[i] != ''):
+                row[i] = int(sample[i])
+
+        rows.append(row)
+        print(len(rows))
+
+perm = np.random.permutation(len(rows))
+
+for i in range(int(len(rows) / file_size) + 1):
+
+    print('Writing to file ' + str(i+1))
+
+    with open('sample' + str(i + 1) + '.csv', 'w') as rf:
+        c = csv.writer(rf, delimiter=',',quoting=csv.QUOTE_MINIMAL)
+
+        for j in range(file_size):
+            if(i * file_size + j >= len(rows)):
+                break; 
+
+            c.writerow(rows[perm[i * file_size + j]])
+
+print(len(rows))

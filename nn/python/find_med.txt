@@ -1,0 +1,26 @@
+import os.path
+import csv
+import statistics
+
+import pandas
+import numpy as np
+
+med = []
+
+curr = os.getcwd()
+
+print('Loading data 1 ...', end = '', flush = True)
+data = pandas.read_csv(curr+'/samples/sample1.csv')
+for i in range(2, 15): #CHANGE (2,15)
+    
+    print('\rLoading data', i, '...', end = '', flush = True)
+    data = np.concatenate((data, pandas.read_csv(curr+'/samples/sample' + str(i) + '.csv')))
+
+for i in range(24):
+    med.append(statistics.median(data[:,i]))
+    print('\nMedian ' + str(i+1) + ': ' + med[i])
+
+with open('median.csv', 'w') as f:
+    print('Writing medians to file ...')
+    c = csv.writer(f, delimiter=',',quoting=csv.QUOTE_MINIMAL)
+    c.writerow(med)

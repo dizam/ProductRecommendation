@@ -1,0 +1,94 @@
+import numpy as np
+import pandas as pd
+from scipy.sparse.linalg import svds
+
+
+training = pd.read_pickle("data/training_panda_0.pkl")
+training = training.append(pd.read_pickle("data/training_panda_1.pkl"))
+training = training.append(pd.read_pickle("data/training_panda_2.pkl"))
+training = training.append(pd.read_pickle("data/training_panda_3.pkl"))
+
+
+
+print("loaded training")
+
+testing = pd.read_pickle("data/testing_panda_0.pkl")
+testing = testing.append(pd.read_pickle("data/testing_panda_1.pkl"))
+
+training = training.apply(pd.to_numeric)
+
+training = training.replace(-1, np.NaN)
+
+training = training.fillna(training.mean())
+
+testing = testing.apply(pd.to_numeric).replace(-1, np.NaN)
+testing = testing.fillna(training.mean())
+
+product_columns = training.columns[~training.columns.isin(testing.columns)]
+
+
+# Doing this because this didnt work
+# testing[product_columns] = training[product_columns].mean()
+for column in product_columns:
+    testing[column] = training[column].mean()
+
+
+all_data = training.append(testing)
+
+#Normalize
+all_data_norm = (all_data - all_data.min()) / all_data.max()
+#Handle 0 columns
+all_data_norm[pd.isnull(all_data_norm)] = 0
+
+print("Finished parsing data")
+
+[u, s, vt] = svds(all_data_norm)
+
+x = np.dot(np.dot(u, np.diag(s)),vt)
+
+print("Calculated svds and resulting matrix")
+
+# The training set predictions
+predictor = x[training.shape[0]:, 24:]
+
+# Increase everything to one so everything is at least greater than 0
+predictor = predictor - predictor.min() + 1
+
+# Add the id again
+predictor = np.insert(predictor, 0, 1, axis=1)
+predictor[:,0] = testing['ncodpers']
+
+# np.save("data/predictor.pkl", predictor, allow_pickle=True)
+#
+# print("Saved a copy of the predictor for later use")
+
+names = training.columns[24:].tolist()
+
+with open("submission.csv", 'w') as fp:
+    fp.write("ncodpers,added_products\n")
+    wbatch = []
+    for i,row in enumerate(predictor):
+        matches = training[training['ncodpers'] == row[0]]
+
+        if len(matches) > 0:
+            if len(matches) > 1:
+                matches = training[training.columns[24:]].values[matches.fecha_dato.idxmax()]
+            else:
+                matches = matches[training.columns[24:]].values[0]
+            predictions = row[1:] * (1 - matches)
+
+        # Most likely candidates
+        top_pred = predictions.argsort()[-7:]
+
+        top_pred_names = [names[i] for i in top_pred]
+
+        user = str(int(row[0]))
+
+        wbatch.append(user+","+" ".join(top_pred_names)+"\n")
+
+
+        if(i % 1000 == 0):
+            fp.writelines(wbatch)
+            wbatch = []
+            print("Finished "+str(i+1)+" predictions")
+    fp.writelines(wbatch)

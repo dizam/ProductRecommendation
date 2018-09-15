@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+
+import csv
+
+inp = open('../data/Soutput.csv')
+out = open('../data/Soutput2.csv', 'w+')
+
+reader = csv.DictReader(inp)
+writer = csv.writer(out, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+writer.writerow(['ncodpers','added_products'])
+
+for row in reader:
+    writer.writerow(
+        [
+            int(float(row['ncodpers'])),
+            row['added_products'] + ' ' + ' '.join(row[None])
+        ]
+    )
+
+inp.close()
+out.close()

@@ -1,0 +1,257 @@
+import pandas as pd
+import numpy as np
+from scipy.linalg import svd
+from scipy.sparse import csr_matrix, vstack
+from scipy.sparse.linalg import svds
+import os
+
+# Dates are annoying, we may want to exclude or modify them
+DATE_COLS = ["fecha_dato", "fecha_alta", "ult_fec_cli_1t"]
+
+# Products are also useful
+PROD_COLS = ['ind_ahor_fin_ult1', 'ind_aval_fin_ult1', 'ind_cco_fin_ult1',
+             'ind_cder_fin_ult1', 'ind_cno_fin_ult1', 'ind_ctju_fin_ult1',
+             'ind_ctma_fin_ult1', 'ind_ctop_fin_ult1', 'ind_ctpp_fin_ult1',
+             'ind_deco_fin_ult1', 'ind_deme_fin_ult1', 'ind_dela_fin_ult1',
+             'ind_ecue_fin_ult1', 'ind_fond_fin_ult1', 'ind_hip_fin_ult1',
+             'ind_plan_fin_ult1', 'ind_pres_fin_ult1', 'ind_reca_fin_ult1',
+             'ind_tjcr_fin_ult1', 'ind_valo_fin_ult1', 'ind_viv_fin_ult1',
+             'ind_nomina_ult1', 'ind_nom_pens_ult1', 'ind_recibo_ult1']
+
+
+def get_averages(file_name):
+    """
+    This is a wildly inefficient function to compute the average accross of all training data
+    :return: A numpy nd-array of averages. Probably want to pickle this
+    """
+    sums = None
+    counts = None
+    for i in range(28):
+        df = pd.read_pickle("data/training_panda_" + str(i) + ".pkl")
+        result = replace_with_nan(df)
+
+        if sums is None:
+            sums = result.sum()
+        else:
+            sums += result.sum()
+        if counts is None:
+            counts = result.count()
+        else:
+            counts += result.count()
+
+    means = sums / counts
+    means.fillna(0).to_pickle("data/" + file_name)
+
+
+def find_last_purchases(file_name):
+    last = None
+    # for i in range(28):
+    #     df = pd.read_pickle("data/training_panda_" + str(i) + ".pkl")
+    #
+    #     df = df[["ncodpers", "fecha_dato"] + PROD_COLS]
+    #
+    #     if last is None:
+    #         last = df
+    #     else:
+    #         last = last.append(df)
+    #
+    #     last = last.sort(columns=["ncodpers", "fecha_dato"])
+    #
+    #     last = last.drop_duplicates(subset=["ncodpers"], keep="last")
+    #
+    #     print("Finished {}".format(i))
+
+
+    last = pd.read_pickle("data/last.pkl")
+
+
+    tester = None
+
+    for i in range(2):
+        df = pd.read_pickle("data/testing_panda_" + str(i) + ".pkl")
+        if tester is None:
+            tester = df["ncodpers"]
+        else:
+            tester = tester.append(df["ncodpers"])
+
+    last = last[last.ncodpers.isin(tester)]
+    last.to_pickle("data/" + file_name)
+
+
+#
+# 416977   2015-01-28
+# 836212   2015-02-28
+
+def replace_with_nan(df):
+    """
+    Convert a dataframe nan representations to actual NaNs for easy ignoring. Also forces numeric typing
+    :param df: A set of customer data
+    :return: A data set with -1 replaced by NaN
+    """
+    cols = [col for col in df.columns if col not in DATE_COLS]
+    df = df[cols]
+    df = df.apply(pd.to_numeric)
+
+    return df.replace(-1, np.NaN)
+
+
+def fill_nans(df, means):
+    return df.fillna(means)
+
+
+def get_svd_matricies(ar):
+    """
+    Computes the initial starting svd
+    :param ar: The matrix of customer info
+    :return: the svds decomposition
+    """
+    return svds(ar, k=10)
+
+
+def rank_one_update(u, s, vt, data):
+    pass
+
+
+def switch_to_purchases_only(df):
+    """
+    Take a dataframe that has been denand etc, and convert it to a sparse matrix of only the products
+    Replace indexes with ids
+    :param df:
+    :return:
+    """
+    return csr_matrix(df[PROD_COLS])
+
+
+def add_product_columns(df, means):
+    """
+    Add product columns to a testing df
+    :param df:
+    :return:
+    """
+    for column in PROD_COLS:
+        df[column] = means[column]
+
+    return df
+
+
+if __name__ == "__main__":
+    if not os.path.isfile("data/means.pkl"):
+        means = get_averages("means.pkl")
+    else:
+        means = pd.read_pickle("data/means.pkl")
+        print("Loaded means")
+
+    if not os.path.isfile("data/last.pkl"):
+        last = find_last_purchases("last.pkl")
+    else:
+        last = pd.read_pickle("data/last.pkl")
+        print("Loaded latest")
+
+    orig = pd.read_pickle("data/training_panda_0.pkl")
+
+    orig = csr_matrix(fill_nans(replace_with_nan(orig), means))
+
+    print("Done with initial training")
+
+    for i in range(1, 3):
+        new_data = pd.read_pickle("data/training_panda_" + str(i) + ".pkl")
+        cleaned = csr_matrix(fill_nans(replace_with_nan(new_data), means))
+
+        orig = vstack([orig, cleaned])
+
+        print("Finished stacking {}th dataset".format(i))
+
+    print("Shuffling data and selecting half")
+
+    np.random.seed(42)  # Seed so we can get consistent results
+
+    # index = np.arange(np.shape(orig)[0]) # Shuffle doesnt work on sparse, we have to first shuffle a series of coords
+    # np.random.shuffle(index)
+    #
+    # orig = orig[index, :]
+    #
+    # orig = orig[0:orig.shape[0]/2]
+
+    num_training = orig.shape[0]
+
+    print("Finished loading {} training data points".format(num_training))
+
+    ncodpers = None
+
+    testing = None
+
+    for i in range(2):
+        new_data = pd.read_pickle("data/testing_panda_" + str(i) + ".pkl")
+        add_product_columns(new_data, means)
+        cleaned = fill_nans(replace_with_nan(new_data), means)
+
+        if testing is None:
+            testing = cleaned
+        else:
+            testing = testing.append(cleaned)
+
+        if ncodpers is None:
+            ncodpers = new_data['ncodpers']
+        else:
+            ncodpers = ncodpers.append(new_data['ncodpers'])
+
+    indicies = np.argsort(ncodpers)
+
+    testing = testing.values[indicies]
+    ncodpers = ncodpers.values[indicies]
+
+    testing = csr_matrix(testing)
+
+    orig = vstack([orig, testing])
+
+    del testing
+
+    num_testing = orig.shape[0] - num_training
+
+    print("Finished loading {} testing points".format(num_testing))
+
+    del means
+
+    [U, S, Vt] = get_svd_matricies(orig)
+
+    print("Calculated SVDs of all data")
+
+    del orig
+
+    A_prime = U.dot(np.diag(S))
+
+    A_prime = A_prime[num_training:, :]
+
+    predictor = A_prime.dot(Vt)
+
+    print("Calculated A'")
+
+    predictor = predictor[:, -24:]
+
+    print("Set asside {} testing samples".format(predictor.shape[0]))
+
+
+    # Force a few deletions
+    del A_prime
+    del U, S, Vt
+
+    with open("submission.csv", 'w') as fp:
+        fp.write("ncodpers,added_products\n")
+        wbatch = []
+
+        for i, row in enumerate(predictor):
+            uid = ncodpers[i]
+
+            row *= (1 - last.iloc[i][2:].values).astype('int')
+
+            top_pred = row.argsort()[-7:]
+
+            top_pred_names = [last.columns[2:][i] for i in top_pred]
+
+            wbatch.append(str(uid) + "," + " ".join(top_pred_names) + "\n")
+
+            if (i % 1000 == 0):
+                fp.writelines(wbatch)
+                wbatch = []
+                print("Finished " + str(i + 1) + " predictions")
+        fp.writelines(wbatch)
